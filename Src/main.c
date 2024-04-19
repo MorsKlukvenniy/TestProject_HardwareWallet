@@ -20,6 +20,9 @@
 #include "main.h"
 #include "cmsis_os.h"
 #include <stdlib.h>
+#include <string.h>
+
+SPI_HandleTypeDef SpiHandle;
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -27,6 +30,9 @@
 /* Private variables ---------------------------------------------------------*/
 osThreadId USARTThreadHandle, SPIThreadHandle;
 QueueHandle_t SPIInQueue, USARTInQueue;
+
+volatile uint16_t SPITx;
+volatile uint16_t SPIRx;
 
 /* Private function prototypes -----------------------------------------------*/
 static void USART_Thread(void const *argument);
@@ -57,6 +63,19 @@ int main(void)
   
   /* Configure the system clock to 216 Mhz */
   SystemClock_Config();
+  
+  /* Set the SPI parameters */
+  SpiHandle.Instance               	= SPI2;
+  SpiHandle.Init.BaudRatePrescaler 	= SPI_BAUDRATEPRESCALER_256;
+  SpiHandle.Init.Direction         	= SPI_DIRECTION_2LINES;
+  SpiHandle.Init.CLKPhase          	= SPI_PHASE_1EDGE;
+  SpiHandle.Init.CLKPolarity       	= SPI_POLARITY_HIGH;
+  SpiHandle.Init.DataSize          	= SPI_DATASIZE_16BIT;
+  SpiHandle.Init.FirstBit          	= SPI_FIRSTBIT_MSB;
+  SpiHandle.Init.TIMode            	= SPI_TIMODE_ENABLED; //! Slave can always send data
+  SpiHandle.Init.CRCCalculation    	= SPI_CRCCALCULATION_DISABLE;
+  SpiHandle.Init.NSS               	= SPI_NSS_SOFT;
+  SpiHandle.Init.Mode 			   	= SPI_MODE_MASTER;
 
   /* Thread 1 definition */
   osThreadDef(1, USART_Thread, osPriorityNormal, 0, configMINIMAL_STACK_SIZE);
@@ -70,13 +89,24 @@ int main(void)
   /* Start thread 2 */
   SPIThreadHandle = osThreadCreate(osThread(2), NULL);
   
-  SPIInQueue = xQueueCreate(32, 1); //!Queue from SPI to USART
-  USARTInQueue = xQueueCreate(32, 2); //!Queue from USART to SPI
+  SPIInQueue = xQueueCreate(32, sizeof(uint8_t)); //!Queue from SPI to USART
+  USARTInQueue = xQueueCreate(32, sizeof(uint16_t)); //!Queue from USART to SPI
 
   if (!SPIInQueue || !USARTInQueue)
   {
 	  exit(1);
   }
+
+  if(HAL_SPI_Init(&SpiHandle) != HAL_OK)
+  {
+	  exit(1);
+  }
+
+  if(HAL_SPI_TransmitReceive_IT(&SpiHandle, (uint8_t*)SPITxBuffer, (uint8_t*)SPIRxBuffer, sizeof(uint16_t)) != HAL_OK)
+  {
+	  exit(1);
+  }
+
 
   /* Start scheduler */
   osKernelStart();
@@ -88,14 +118,14 @@ int main(void)
 static void USART_Thread(void const *argument)
 {
 	(void) argument;
-	char buff_in[2];
-	memset(buff_in, 0, 2);
+	uint16_t buff_in = 0;
 	for(;;)
 	{
 		//! Receive rx data from queue
-		if (xQueueReceive(USARTInQueue, buff_in, portMAX_DELAY) == pdTRUE)
+		if (xQueueReceive(USARTInQueue, &buff_in, portMAX_DELAY) == pdTRUE)
 		{
 			//! Send data to SPI
+			HAL_SPI_Transmit(&SpiHandle, (uint8_t*)&buff_in, sizeof(uint16_t), portMAX_DELAY);
 		}
 	}
 }
@@ -103,18 +133,30 @@ static void USART_Thread(void const *argument)
 static void SPI_Thread(void const *argument)
 {
 	(void) argument;
-	char buff_in[1];
-	memset(buff_in, 0, 1);
+	uint8_t buff_in = 0;
 	for(;;)
 	{
 		//! Receive rx data from queue
-		if (xQueueReceive(SPIInQueue, buff_in, portMAX_DELAY) == pdTRUE)
+		if (xQueueReceive(SPIInQueue, &buff_in, portMAX_DELAY) == pdTRUE)
 		{
 			//! Send data to USART
 		}
 	}
 }
 
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+	//! Send rx data to thread queue
+	//! If data is NULL, then string in end no need to transmit
+	if (SPIRx != 0)
+	{
+		//!Hi
+		xQueueSendFromISR(SPIInQueue, SPIRx, 0);
+		//!Lo
+		xQueueSendFromISR(SPIInQueue, ((uint8_t*)&SPIRx)+1, 0);
+		SPIRx = 0;
+	}
+}
 /**
   * @brief  System Clock Configuration
   *         The system Clock is configured as follow : 

@@ -27,6 +27,26 @@
 	</natures>
 	<linkedResources>
 		<link>
+			<name>stm32f7xx_hal_spi.c</name>
+			<type>1</type>
+			<locationURI>WORKSPACE_LOC/FreeRTOS/Drivers/STM32F7xx_HAL_Driver/Src/stm32f7xx_hal_spi.c</locationURI>
+		</link>
+		<link>
+			<name>stm32f7xx_hal_spi.h</name>
+			<type>1</type>
+			<location>D:/Projects/STM32CubeIDE/workspace_1.9.0/FreeRTOS/Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_spi.h</location>
+		</link>
+		<link>
+			<name>stm32f7xx_hal_usart.c</name>
+			<type>1</type>
+			<location>D:/Projects/STM32CubeIDE/workspace_1.9.0/FreeRTOS/Drivers/STM32F7xx_HAL_Driver/Src/stm32f7xx_hal_usart.c</location>
+		</link>
+		<link>
+			<name>stm32f7xx_hal_usart.h</name>
+			<type>1</type>
+			<location>D:/Projects/STM32CubeIDE/workspace_1.9.0/FreeRTOS/Drivers/STM32F7xx_HAL_Driver/Inc/stm32f7xx_hal_usart.h</location>
+		</link>
+		<link>
 			<name>Components/ft6x06.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Drivers/BSP/Components/ft6x06/ft6x06.c</locationURI>
