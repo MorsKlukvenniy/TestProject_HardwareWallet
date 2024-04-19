@@ -19,16 +19,18 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "cmsis_os.h"
+#include <stdlib.h>
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
-osThreadId LEDThread1Handle, LEDThread2Handle;
+osThreadId USARTThreadHandle, SPIThreadHandle;
+QueueHandle_t SPIInQueue, USARTInQueue;
 
 /* Private function prototypes -----------------------------------------------*/
-static void LED_Thread1(void const *argument);
-static void LED_Thread2(void const *argument);
+static void USART_Thread(void const *argument);
+static void SPI_Thread(void const *argument);
 static void SystemClock_Config(void);
 static void CPU_CACHE_Enable(void);
 
@@ -55,23 +57,27 @@ int main(void)
   
   /* Configure the system clock to 216 Mhz */
   SystemClock_Config();
-  
-  /* Initialize LEDs */
-  BSP_LED_Init(LED_RED);
-  BSP_LED_Init(LED_GREEN);
-  
+
   /* Thread 1 definition */
-  osThreadDef(LED_RED, LED_Thread1, osPriorityNormal, 0, configMINIMAL_STACK_SIZE);
+  osThreadDef(1, USART_Thread, osPriorityNormal, 0, configMINIMAL_STACK_SIZE);
   
   /* Thread 2 definition */
-  osThreadDef(LED_GREEN, LED_Thread2, osPriorityNormal, 0, configMINIMAL_STACK_SIZE);
+  osThreadDef(2, SPI_Thread, osPriorityNormal, 0, configMINIMAL_STACK_SIZE);
   
   /* Start thread 1 */
-  LEDThread1Handle = osThreadCreate(osThread(LED_RED), NULL);
+  USARTThreadHandle = osThreadCreate(osThread(1), NULL);
   
   /* Start thread 2 */
-  LEDThread2Handle = osThreadCreate(osThread(LED_GREEN), NULL);
+  SPIThreadHandle = osThreadCreate(osThread(2), NULL);
   
+  SPIInQueue = xQueueCreate(32, 1); //!Queue from SPI to USART
+  USARTInQueue = xQueueCreate(32, 2); //!Queue from USART to SPI
+
+  if (!SPIInQueue || !USARTInQueue)
+  {
+	  exit(1);
+  }
+
   /* Start scheduler */
   osKernelStart();
   
@@ -79,80 +85,34 @@ int main(void)
   for(;;);
 }
 
-/**
-  * @brief  Toggle LED_RED thread
-  * @param  Thread not used
-  * @retval None
-  */
-static void LED_Thread1(void const *argument)
+static void USART_Thread(void const *argument)
 {
-  uint32_t count = 0;
-  (void) argument;
-  
-  for(;;)
-  {
-    count = osKernelSysTick() + 6000;
-    
-    /* Toggle LED_RED every 200 ms for 6 s */
-    while (count > osKernelSysTick())
-    {
-      BSP_LED_Toggle(LED_RED);
-      
-      osDelay(200);
-    }
-    
-    /* Turn off LED_RED */
-    BSP_LED_Off(LED_RED);
-    
-    /* Suspend Thread 1 */
-    osThreadSuspend(NULL);
-    
-    count = osKernelSysTick() + 6000;
-    
-    /* Toggle LED_RED every 400 ms for 6 s */
-    while (count > osKernelSysTick())
-    {
-      BSP_LED_Toggle(LED_RED);
-      
-      osDelay(400);
-    }
-    
-    /* Resume Thread 2 */
-    osThreadResume(LEDThread2Handle); 
-  }
+	(void) argument;
+	char buff_in[2];
+	memset(buff_in, 0, 2);
+	for(;;)
+	{
+		//! Receive rx data from queue
+		if (xQueueReceive(USARTInQueue, buff_in, portMAX_DELAY) == pdTRUE)
+		{
+			//! Send data to SPI
+		}
+	}
 }
 
-/**
-  * @brief  Toggle LED_GREEN thread
-  * @param  argument not used
-  * @retval None
-  */
-static void LED_Thread2(void const *argument)
+static void SPI_Thread(void const *argument)
 {
-  uint32_t count;
-  (void) argument;
-  
-  for(;;)
-  {
-    count = osKernelSysTick() + 12000;
-    
-    /* Toggle LED_GREEN every 500 ms for 12 s */
-    while (count > osKernelSysTick())
-    {
-      BSP_LED_Toggle(LED_GREEN);
-      
-      osDelay(500);
-    }
-    
-    /* Turn off LED_GREEN */
-    BSP_LED_Off(LED_GREEN);
-    
-    /* Resume Thread 1 */
-    osThreadResume(LEDThread1Handle);
-    
-    /* Suspend Thread 2 */
-    osThreadSuspend(NULL);  
-  }
+	(void) argument;
+	char buff_in[1];
+	memset(buff_in, 0, 1);
+	for(;;)
+	{
+		//! Receive rx data from queue
+		if (xQueueReceive(SPIInQueue, buff_in, portMAX_DELAY) == pdTRUE)
+		{
+			//! Send data to USART
+		}
+	}
 }
 
 /**
