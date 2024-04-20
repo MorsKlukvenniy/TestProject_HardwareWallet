@@ -23,6 +23,7 @@
 #include <string.h>
 
 SPI_HandleTypeDef SpiHandle;
+USART_HandleTypeDef UsartHandle;
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -33,6 +34,10 @@ QueueHandle_t SPIInQueue, USARTInQueue;
 
 volatile uint16_t SPITx;
 volatile uint16_t SPIRx;
+volatile uint8_t USARTTx;
+volatile uint8_t USARTRx;
+volatile uint8_t USARTRx2;
+volatile size_t usarCounter = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 static void USART_Thread(void const *argument);
@@ -77,6 +82,16 @@ int main(void)
   SpiHandle.Init.NSS               	= SPI_NSS_SOFT;
   SpiHandle.Init.Mode 			   	= SPI_MODE_MASTER;
 
+  UsartHandle.Instance				= USART2;
+  UsartHandle.Init.BaudRate			= 9600;
+  UsartHandle.Init.CLKLastBit		= USART_LASTBIT_DISABLE;
+  UsartHandle.Init.CLKPhase 		= USART_PHASE_1EDGE;
+  UsartHandle.Init.CLKPolarity 		= USART_POLARITY_HIGH;
+  UsartHandle.Init.Mode 			= USART_MODE_TX_RX;
+  UsartHandle.Init.Parity 			= USART_PARITY_NONE;
+  UsartHandle.Init.StopBits 		= USART_STOPBITS_1;
+  UsartHandle.Init.WordLength 		= USART_WORDLENGTH_8B;
+
   /* Thread 1 definition */
   osThreadDef(1, USART_Thread, osPriorityNormal, 0, configMINIMAL_STACK_SIZE);
   
@@ -102,11 +117,15 @@ int main(void)
 	  exit(1);
   }
 
-  if(HAL_SPI_TransmitReceive_IT(&SpiHandle, (uint8_t*)SPITxBuffer, (uint8_t*)SPIRxBuffer, sizeof(uint16_t)) != HAL_OK)
+  if(HAL_SPI_TransmitReceive_IT(&SpiHandle, (uint8_t*)&SPITx, (uint8_t*)&SPIRx, sizeof(uint16_t)) != HAL_OK)
   {
 	  exit(1);
   }
 
+  if(HAL_USART_TransmitReceive_IT(&UsartHandle, (uint8_t*)&USARTTx, (uint8_t*)&USARTRx, sizeof(uint8_t)) != HAL_OK)
+  {
+	  exit(1);
+  }
 
   /* Start scheduler */
   osKernelStart();
@@ -133,13 +152,21 @@ static void USART_Thread(void const *argument)
 static void SPI_Thread(void const *argument)
 {
 	(void) argument;
+	static size_t stringNotEnd = 0;
 	uint8_t buff_in = 0;
 	for(;;)
 	{
 		//! Receive rx data from queue
 		if (xQueueReceive(SPIInQueue, &buff_in, portMAX_DELAY) == pdTRUE)
 		{
-			//! Send data to USART
+			if (stringNotEnd)
+			{
+				//! Send data to USART
+				HAL_USART_Transmit(&UsartHandle, &buff_in, sizeof(uint8_t), portMAX_DELAY);
+			}
+			//! If data is NULL, then string in end no need to transmit
+			if (buff_in == 0) stringNotEnd = 1;
+			else stringNotEnd = 0;
 		}
 	}
 }
@@ -151,12 +178,29 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 	if (SPIRx != 0)
 	{
 		//!Hi
-		xQueueSendFromISR(SPIInQueue, SPIRx, 0);
+		xQueueSendFromISR(SPIInQueue, (uint8_t*)&SPIRx, 0);
 		//!Lo
 		xQueueSendFromISR(SPIInQueue, ((uint8_t*)&SPIRx)+1, 0);
 		SPIRx = 0;
 	}
 }
+
+void HAL_USART_RxCpltCallback(USART_HandleTypeDef *hspi)
+{
+	//! Send rx data to thread queue
+	if ((usarCounter++) & 0x1)
+	{
+		uint16_t buff = (USARTRx2 << 8) | USARTRx;
+		xQueueSendFromISR(USARTInQueue, &buff, 0);
+		USARTRx2 = 0;
+	}
+	else
+	{
+		USARTRx2 = USARTRx;
+	}
+	USARTRx = 0;
+}
+
 /**
   * @brief  System Clock Configuration
   *         The system Clock is configured as follow : 
