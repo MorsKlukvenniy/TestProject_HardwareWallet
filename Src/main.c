@@ -83,7 +83,7 @@ int main(void)
   SpiHandle.Init.Mode 			   	= SPI_MODE_MASTER;
 
   UsartHandle.Instance				= USART2;
-  UsartHandle.Init.BaudRate			= 9600;
+  UsartHandle.Init.BaudRate			= 211000;
   UsartHandle.Init.CLKLastBit		= USART_LASTBIT_DISABLE;
   UsartHandle.Init.CLKPhase 		= USART_PHASE_1EDGE;
   UsartHandle.Init.CLKPolarity 		= USART_POLARITY_HIGH;
@@ -138,13 +138,28 @@ static void USART_Thread(void const *argument)
 {
 	(void) argument;
 	uint16_t buff_in = 0;
+	static size_t USARTstringNotEnd = 0;
 	for(;;)
 	{
 		//! Receive rx data from queue
 		if (xQueueReceive(USARTInQueue, &buff_in, portMAX_DELAY) == pdTRUE)
 		{
-			//! Send data to SPI
-			HAL_SPI_Transmit(&SpiHandle, (uint8_t*)&buff_in, sizeof(uint16_t), portMAX_DELAY);
+			//! If data is NULL, then string in end no need to transmit
+			if (((buff_in & 0xf0) == 0) || ((buff_in & 0xf) == 0))
+			{
+				if (USARTstringNotEnd)
+				{
+					//! Send data to SPI
+					HAL_SPI_Transmit(&SpiHandle, (uint8_t*)&buff_in, sizeof(uint16_t), portMAX_DELAY);
+				}
+				USARTstringNotEnd = 0;
+			}
+			else
+			{
+				USARTstringNotEnd = 1;
+				//! Send data to SPI
+				HAL_SPI_Transmit(&SpiHandle, (uint8_t*)&buff_in, sizeof(uint16_t), portMAX_DELAY);
+			}
 		}
 	}
 }
@@ -152,21 +167,29 @@ static void USART_Thread(void const *argument)
 static void SPI_Thread(void const *argument)
 {
 	(void) argument;
-	static size_t stringNotEnd = 0;
+	static size_t SPIstringNotEnd = 0;
 	uint8_t buff_in = 0;
 	for(;;)
 	{
 		//! Receive rx data from queue
 		if (xQueueReceive(SPIInQueue, &buff_in, portMAX_DELAY) == pdTRUE)
 		{
-			if (stringNotEnd)
+			//! If data is NULL, then string in end no need to transmit
+			if (buff_in == 0)
 			{
+				if (SPIstringNotEnd)
+				{
+					//! Send data to USART
+					HAL_USART_Transmit(&UsartHandle, &buff_in, sizeof(uint8_t), portMAX_DELAY);
+				}
+				SPIstringNotEnd = 0;
+			}
+			else
+			{
+				SPIstringNotEnd = 1;
 				//! Send data to USART
 				HAL_USART_Transmit(&UsartHandle, &buff_in, sizeof(uint8_t), portMAX_DELAY);
 			}
-			//! If data is NULL, then string in end no need to transmit
-			if (buff_in == 0) stringNotEnd = 1;
-			else stringNotEnd = 0;
 		}
 	}
 }
@@ -174,15 +197,11 @@ static void SPI_Thread(void const *argument)
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 {
 	//! Send rx data to thread queue
-	//! If data is NULL, then string in end no need to transmit
-	if (SPIRx != 0)
-	{
-		//!Hi
-		xQueueSendFromISR(SPIInQueue, (uint8_t*)&SPIRx, 0);
-		//!Lo
-		xQueueSendFromISR(SPIInQueue, ((uint8_t*)&SPIRx)+1, 0);
-		SPIRx = 0;
-	}
+	//!Hi
+	xQueueSendFromISR(SPIInQueue, (uint8_t*)&SPIRx, 0);
+	//!Lo
+	xQueueSendFromISR(SPIInQueue, ((uint8_t*)&SPIRx)+1, 0);
+	SPIRx = 0;
 }
 
 void HAL_USART_RxCpltCallback(USART_HandleTypeDef *hspi)
